@@ -6,6 +6,7 @@ export interface OutlineRenderer {
   renderOutlines(outlines: OutlineData[]): void;
   resize(size: Size): void;
   scroll(deltaX: number, deltaY: number): void;
+  dispose(): void;
 }
 
 export class CanvasOutlineRenderer implements OutlineRenderer {
@@ -45,6 +46,8 @@ export class CanvasOutlineRenderer implements OutlineRenderer {
       this.animationFrameId = requestAnimationFrame(this.draw);
     }
   }
+
+  dispose(): void {}
 
   private setCanvasSize(size: Size) {
     this.canvas.style.width = `{size.width}px`;
@@ -154,6 +157,10 @@ export class WorkerOutlineRenderer implements OutlineRenderer {
       },
       [offscreenCanvas],
     );
+  }
+
+  dispose(): void {
+    this.worker.terminate();
   }
 
   private setCanvasSize(size: Size) {
