@@ -61,6 +61,7 @@ export class CanvasOutlineRenderer implements OutlineRenderer {
   }
 
   private updateOutlines(outlines: OutlineData[]) {
+    const now = performance.now();
     for (const {
       id,
       name,
@@ -79,7 +80,7 @@ export class CanvasOutlineRenderer implements OutlineRenderer {
         y,
         width,
         height,
-        frame: 0,
+        startTime: now,
         targetX: x,
         targetY: y,
         targetWidth: width,
@@ -91,7 +92,7 @@ export class CanvasOutlineRenderer implements OutlineRenderer {
       const existingOutline = this.activeOutlines.get(key);
       if (existingOutline) {
         existingOutline.count++;
-        existingOutline.frame = 0;
+        existingOutline.startTime = now;
         existingOutline.targetX = x;
         existingOutline.targetY = y;
         existingOutline.targetWidth = width;
