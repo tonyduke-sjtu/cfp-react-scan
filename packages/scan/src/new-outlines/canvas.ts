@@ -1,8 +1,8 @@
-import type { ActiveOutline, OutlineData } from './types';
+import type { ActiveOutline, OutlineData } from "./types";
 
 export const OUTLINE_ARRAY_SIZE = 7;
 export const MONO_FONT =
-  'Menlo,Consolas,Monaco,Liberation Mono,Lucida Console,monospace';
+  "Menlo,Consolas,Monaco,Liberation Mono,Lucida Console,monospace";
 
 export const INTERPOLATION_SPEED = 0.1;
 export const lerp = (start: number, end: number) => {
@@ -11,10 +11,10 @@ export const lerp = (start: number, end: number) => {
 
 export const MAX_PARTS_LENGTH = 4;
 export const MAX_LABEL_LENGTH = 40;
-export const TOTAL_FRAMES = 45;
+export const TOTAL_DURATION_MS = 750;
 
-export const primaryColor = '115,97,230';
-export const secondaryColor = '128,128,128';
+export const primaryColor = "115,97,230";
+export const secondaryColor = "128,128,128";
 
 export const getLabelText = (outlines: ActiveOutline[]): string => {
   const nameByCount = new Map<string, number>();
@@ -37,15 +37,15 @@ export const getLabelText = (outlines: ActiveOutline[]): string => {
     ([countA], [countB]) => countB - countA,
   );
   const partsLength = partsEntries.length;
-  let labelText = '';
+  let labelText = "";
   for (let i = 0; i < partsLength; i++) {
     const [count, names] = partsEntries[i];
-    let part = `${names.slice(0, MAX_PARTS_LENGTH).join(', ')} ×${count}`;
+    let part = `${names.slice(0, MAX_PARTS_LENGTH).join(", ")} ×${count}`;
     if (part.length > MAX_LABEL_LENGTH) {
       part = `${part.slice(0, MAX_LABEL_LENGTH)}…`;
     }
     if (i !== partsLength - 1) {
-      part += ', ';
+      part += ", ";
     }
     labelText += part;
   }
@@ -69,6 +69,7 @@ export const updateOutlines = (
   activeOutlines: Map<string, ActiveOutline>,
   outlines: OutlineData[],
 ) => {
+  const now = performance.now();
   for (const { id, name, count, x, y, width, height, didCommit } of outlines) {
     const outline: ActiveOutline = {
       id,
@@ -78,7 +79,7 @@ export const updateOutlines = (
       y,
       width,
       height,
-      frame: 0,
+      startTime: now,
       targetX: x,
       targetY: y,
       targetWidth: width,
@@ -90,7 +91,7 @@ export const updateOutlines = (
     const existingOutline = activeOutlines.get(key);
     if (existingOutline) {
       existingOutline.count++;
-      existingOutline.frame = 0;
+      existingOutline.startTime = now;
       existingOutline.targetX = x;
       existingOutline.targetY = y;
       existingOutline.targetWidth = width;
@@ -119,7 +120,7 @@ export const initCanvas = (
   canvas: HTMLCanvasElement | OffscreenCanvas,
   dpr: number,
 ) => {
-  const ctx = canvas.getContext('2d', { alpha: true }) as
+  const ctx = canvas.getContext("2d", { alpha: true }) as
     | CanvasRenderingContext2D
     | OffscreenCanvasRenderingContext2D;
   if (ctx) {
@@ -134,6 +135,7 @@ export const drawCanvas = (
   dpr: number,
   activeOutlines: Map<string, ActiveOutline>,
 ) => {
+  const now = performance.now();
   ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
 
   const groupedOutlinesMap = new Map<string, ActiveOutline[]>();
@@ -158,7 +160,7 @@ export const drawCanvas = (
       targetY,
       targetWidth,
       targetHeight,
-      frame,
+      startTime,
     } = outline;
     if (targetX !== x) {
       outline.x = lerp(x, targetX);
@@ -184,8 +186,8 @@ export const drawCanvas = (
       groupedOutlinesMap.set(labelKey, [outline]);
     }
 
-    const alpha = 1 - frame / TOTAL_FRAMES;
-    outline.frame++;
+    const timeElapsedMs = now - startTime;
+    const alpha = Math.max(0, 1 - timeElapsedMs / TOTAL_DURATION_MS);
 
     const rect = rectMap.get(rectKey) || {
       x,
@@ -227,12 +229,14 @@ export const drawCanvas = (
     }
   >();
 
-  ctx.textRendering = 'optimizeSpeed';
+  ctx.textRendering = "optimizeSpeed";
 
   for (const outlines of groupedOutlinesMap.values()) {
     const first = outlines[0];
-    const { x, y, frame } = first;
-    const alpha = 1 - frame / TOTAL_FRAMES;
+    const { x, y, startTime } = first;
+
+    const timeElapsedMs = now - startTime;
+    const alpha = Math.max(0, 1 - timeElapsedMs / TOTAL_DURATION_MS);
     const text = getLabelText(outlines);
     const { width } = ctx.measureText(text);
     const height = 11;
@@ -252,7 +256,7 @@ export const drawCanvas = (
       labelY = 0;
     }
 
-    if (frame > TOTAL_FRAMES) {
+    if (timeElapsedMs > TOTAL_DURATION_MS) {
       for (const outline of outlines) {
         activeOutlines.delete(String(outline.id));
       }

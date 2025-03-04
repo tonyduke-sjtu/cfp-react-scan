@@ -52,7 +52,7 @@ export interface ActiveOutline {
   targetY: number;
   targetWidth: number;
   targetHeight: number;
-  frame: number;
+  startTime: number;
   didCommit: 1 | 0;
 }
 

@@ -1,5 +1,5 @@
-import { OUTLINE_ARRAY_SIZE, drawCanvas, initCanvas } from './canvas';
-import type { ActiveOutline } from './types';
+import { OUTLINE_ARRAY_SIZE, drawCanvas, initCanvas } from "./canvas";
+import type { ActiveOutline } from "./types";
 
 let canvas: OffscreenCanvas | null = null;
 let ctx: OffscreenCanvasRenderingContext2D | null = null;
@@ -23,7 +23,7 @@ const draw = () => {
 self.onmessage = (event) => {
   const { type } = event.data;
 
-  if (type === 'init') {
+  if (type === "init") {
     canvas = event.data.canvas;
     dpr = event.data.dpr;
 
@@ -36,7 +36,7 @@ self.onmessage = (event) => {
 
   if (!canvas || !ctx) return;
 
-  if (type === 'resize') {
+  if (type === "resize") {
     dpr = event.data.dpr;
     canvas.width = event.data.width * dpr;
     canvas.height = event.data.height * dpr;
@@ -47,8 +47,9 @@ self.onmessage = (event) => {
     return;
   }
 
-  if (type === 'draw-outlines') {
+  if (type === "draw-outlines") {
     const { data, names } = event.data;
+    const now = performance.now();
 
     const sharedView = new Float32Array(data);
     for (let i = 0; i < sharedView.length; i += OUTLINE_ARRAY_SIZE) {
@@ -66,7 +67,7 @@ self.onmessage = (event) => {
         y,
         width,
         height,
-        frame: 0,
+        startTime: now,
         targetX: x,
         targetY: y,
         targetWidth: width,
@@ -78,7 +79,7 @@ self.onmessage = (event) => {
       const existingOutline = activeOutlines.get(key);
       if (existingOutline) {
         existingOutline.count++;
-        existingOutline.frame = 0;
+        existingOutline.startTime = now;
         existingOutline.targetX = x;
         existingOutline.targetY = y;
         existingOutline.targetWidth = width;
@@ -96,7 +97,7 @@ self.onmessage = (event) => {
     return;
   }
 
-  if (type === 'scroll') {
+  if (type === "scroll") {
     const { deltaX, deltaY } = event.data;
     for (const outline of activeOutlines.values()) {
       const newX = outline.x - deltaX;
