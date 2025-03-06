@@ -50,8 +50,8 @@ export class CanvasOutlineRenderer implements OutlineRenderer {
   dispose(): void {}
 
   private setCanvasSize(size: Size) {
-    this.canvas.style.width = `{size.width}px`;
-    this.canvas.style.height = `{size.height}px`;
+    this.canvas.style.width = `${size.width}px`;
+    this.canvas.style.height = `${size.height}px`;
     this.canvas.width = size.width * this.dpr;
     this.canvas.height = size.height * this.dpr;
     if (this.ctx) {
