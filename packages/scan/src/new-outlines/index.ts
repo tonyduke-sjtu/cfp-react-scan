@@ -12,23 +12,13 @@ import { readLocalStorage, removeLocalStorage } from '~web/utils/helpers';
 import { log, logIntro } from '~web/utils/log';
 import { inspectorUpdateSignal } from '~web/views/inspector/states';
 import {
-  OUTLINE_ARRAY_SIZE,
-  drawCanvas,
-  initCanvas,
-  updateOutlines,
-  updateScroll,
-} from './canvas';
-import type { ActiveOutline, BlueprintOutline, OutlineData } from './types';
+  CanvasOutlineRenderer,
+  type OutlineRenderer,
+  WorkerOutlineRenderer,
+} from './outline-renderer';
+import type { BlueprintOutline, OutlineData } from './types';
 
-// The worker code will be replaced at build time
-const workerCode = '__WORKER_CODE__';
-
-let worker: Worker | null = null;
-let canvas: HTMLCanvasElement | null = null;
-let ctx: CanvasRenderingContext2D | null = null;
-let dpr = 1;
-let animationFrameId: number | null = null;
-const activeOutlines = new Map<string, ActiveOutline>();
+let outlineRenderer: OutlineRenderer | null = null;
 
 const blueprintMap = new Map<Fiber, BlueprintOutline>();
 const blueprintMapKeys = new Set<Fiber>();
@@ -133,9 +123,6 @@ export const getBatchedRectMap = async function* (
   }
 };
 
-const SupportedArrayBuffer =
-  typeof SharedArrayBuffer !== 'undefined' ? SharedArrayBuffer : ArrayBuffer;
-
 export const flushOutlines = async () => {
   const elements: Element[] = [];
 
@@ -186,11 +173,6 @@ export const flushOutlines = async () => {
     }
 
     if (blueprints.length > 0) {
-      const arrayBuffer = new SupportedArrayBuffer(
-        blueprints.length * OUTLINE_ARRAY_SIZE * 4,
-      );
-      const sharedView = new Float32Array(arrayBuffer);
-      const blueprintNames = new Array(blueprints.length);
       let outlineData: OutlineData[] | undefined;
 
       for (let i = 0, len = blueprints.length; i < len; i++) {
@@ -199,42 +181,21 @@ export const flushOutlines = async () => {
         const { x, y, width, height } = blueprintRects[i];
         const { count, name, didCommit } = blueprint;
 
-        if (worker) {
-          const scaledIndex = i * OUTLINE_ARRAY_SIZE;
-          sharedView[scaledIndex] = id;
-          sharedView[scaledIndex + 1] = count;
-          sharedView[scaledIndex + 2] = x;
-          sharedView[scaledIndex + 3] = y;
-          sharedView[scaledIndex + 4] = width;
-          sharedView[scaledIndex + 5] = height;
-          sharedView[scaledIndex + 6] = didCommit;
-          blueprintNames[i] = name;
-        } else {
-          outlineData ||= new Array(blueprints.length);
-          outlineData[i] = {
-            id,
-            name,
-            count,
-            x,
-            y,
-            width,
-            height,
-            didCommit: didCommit as 0 | 1,
-          };
-        }
+        outlineData ||= new Array(blueprints.length);
+        outlineData[i] = {
+          id,
+          name,
+          count,
+          x,
+          y,
+          width,
+          height,
+          didCommit: didCommit as 0 | 1,
+        };
       }
 
-      if (worker) {
-        worker.postMessage({
-          type: 'draw-outlines',
-          data: arrayBuffer,
-          names: blueprintNames,
-        });
-      } else if (canvas && ctx && outlineData) {
-        updateOutlines(activeOutlines, outlineData);
-        if (!animationFrameId) {
-          animationFrameId = requestAnimationFrame(draw);
-        }
+      if (outlineData) {
+        outlineRenderer?.renderOutlines(outlineData);
       }
     }
   }
@@ -242,18 +203,6 @@ export const flushOutlines = async () => {
   for (const fiber of blueprintMapKeys) {
     blueprintMap.delete(fiber);
     blueprintMapKeys.delete(fiber);
-  }
-};
-
-const draw = () => {
-  if (!ctx || !canvas) return;
-
-  const shouldContinue = drawCanvas(ctx, canvas, dpr, activeOutlines);
-
-  if (shouldContinue) {
-    animationFrameId = requestAnimationFrame(draw);
-  } else {
-    animationFrameId = null;
   }
 };
 
@@ -276,16 +225,8 @@ export const getCanvasEl = () => {
   const canvasEl = shadowRoot.firstChild as HTMLCanvasElement;
   if (!canvasEl) return null;
 
-  dpr = getDpr();
-  canvas = canvasEl;
-
-  const { innerWidth, innerHeight } = window;
-  canvasEl.style.width = `${innerWidth}px`;
-  canvasEl.style.height = `${innerHeight}px`;
-  const width = innerWidth * dpr;
-  const height = innerHeight * dpr;
-  canvasEl.width = width;
-  canvasEl.height = height;
+  const dpr = getDpr();
+  const size = { width: window.innerWidth, height: window.innerHeight };
 
   if (IS_OFFSCREEN_CANVAS_WORKER_SUPPORTED) {
     try {
@@ -295,23 +236,7 @@ export const getCanvasEl = () => {
       removeLocalStorage('use-extension-worker');
 
       if (useExtensionWorker) {
-        worker = new Worker(
-          URL.createObjectURL(
-            new Blob([workerCode], { type: 'application/javascript' }),
-          ),
-        );
-
-        const offscreenCanvas = canvasEl.transferControlToOffscreen();
-        worker?.postMessage(
-          {
-            type: 'init',
-            canvas: offscreenCanvas,
-            width: canvasEl.width,
-            height: canvasEl.height,
-            dpr,
-          },
-          [offscreenCanvas],
-        );
+        outlineRenderer = new WorkerOutlineRenderer(canvasEl, size, dpr);
       }
     } catch (e) {
       // biome-ignore lint/suspicious/noConsole: Intended debug output
@@ -319,39 +244,14 @@ export const getCanvasEl = () => {
     }
   }
 
-  if (!worker) {
-    ctx = initCanvas(canvasEl, dpr) as CanvasRenderingContext2D;
+  if (!outlineRenderer) {
+    outlineRenderer = new CanvasOutlineRenderer(canvasEl, size, dpr);
   }
 
-  let isResizeScheduled = false;
   window.addEventListener('resize', () => {
-    if (!isResizeScheduled) {
-      isResizeScheduled = true;
-      setTimeout(() => {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        dpr = getDpr();
-        canvasEl.style.width = `${width}px`;
-        canvasEl.style.height = `${height}px`;
-        if (worker) {
-          worker.postMessage({
-            type: 'resize',
-            width,
-            height,
-            dpr,
-          });
-        } else {
-          canvasEl.width = width * dpr;
-          canvasEl.height = height * dpr;
-          if (ctx) {
-            ctx.resetTransform();
-            ctx.scale(dpr, dpr);
-          }
-          draw();
-        }
-        isResizeScheduled = false;
-      });
-    }
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    outlineRenderer?.resize({ width, height });
   });
 
   let prevScrollX = window.scrollX;
@@ -359,25 +259,15 @@ export const getCanvasEl = () => {
   let isScrollScheduled = false;
 
   window.addEventListener('scroll', () => {
+    const { scrollX, scrollY } = window;
+    const deltaX = scrollX - prevScrollX;
+    const deltaY = scrollY - prevScrollY;
+    prevScrollX = scrollX;
+    prevScrollY = scrollY;
     if (!isScrollScheduled) {
       isScrollScheduled = true;
       setTimeout(() => {
-        const { scrollX, scrollY } = window;
-        const deltaX = scrollX - prevScrollX;
-        const deltaY = scrollY - prevScrollY;
-        prevScrollX = scrollX;
-        prevScrollY = scrollY;
-        if (worker) {
-          worker.postMessage({
-            type: 'scroll',
-            deltaX,
-            deltaY,
-          });
-        } else {
-          requestAnimationFrame(() => {
-            updateScroll(activeOutlines, deltaX, deltaY);
-          });
-        }
+        outlineRenderer?.scroll(deltaX, deltaY);
         isScrollScheduled = false;
       }, 16 * 2);
     }

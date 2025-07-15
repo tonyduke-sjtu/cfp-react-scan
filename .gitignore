@@ -10,3 +10,4 @@ playgrounds
 # SSL Certificates
 bin/certs/*.pem
 bin/certs/*.key
+.npm
